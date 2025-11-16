@@ -7,6 +7,7 @@ import { UserModule } from './user/user.module';
 import { ChildModule } from './child/child.module';
 import { AuthModule } from './auth/auth.module';
 import { MessageModule } from './message/message.module';
+import { DangerZoneModule } from './danger-zone/danger-zone.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { MessageModule } from './message/message.module';
     UserModule,
     ChildModule,
     MessageModule,
+    DangerZoneModule,
   ],
   controllers: [AppController],
   providers: [AppService],

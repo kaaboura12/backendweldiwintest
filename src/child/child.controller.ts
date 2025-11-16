@@ -19,6 +19,7 @@ import { ChildService } from './child.service';
 import { CreateChildDto } from './dto/create-child.dto';
 import { UpdateChildDto } from './dto/update-child.dto';
 import { UpdateChildLocationDto } from './dto/update-child-location.dto';
+import { LinkParentByQrDto } from './dto/link-parent.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -101,6 +102,54 @@ export class ChildController {
     @CurrentUser() currentUser: any,
   ) {
     return this.childService.updateLocation(id, updateChildLocationDto, currentUser);
+  }
+
+  @Post('link-parent')
+  @Roles(UserRole.PARENT)
+  @ApiOperation({ 
+    summary: 'Link parent to child by scanning QR code',
+    description: 'Parent scans child QR code to become a linked parent. They will receive all notifications and have access to the child.'
+  })
+  @ApiResponse({ status: 200, description: 'Parent successfully linked to child' })
+  @ApiResponse({ status: 400, description: 'Invalid QR code or parent already linked' })
+  @ApiResponse({ status: 404, description: 'Child with this QR code not found' })
+  linkParentByQr(@Body() linkParentDto: LinkParentByQrDto, @CurrentUser() currentUser: any) {
+    return this.childService.linkParentByQr(linkParentDto.qrCode, currentUser);
+  }
+
+  @Delete(':id/unlink-parent')
+  @Roles(UserRole.ADMIN, UserRole.PARENT)
+  @ApiOperation({ 
+    summary: 'Unlink current parent from child',
+    description: 'Parent can unlink themselves, or main parent/admin can remove any linked parent'
+  })
+  @ApiParam({ name: 'id', description: 'Child ID' })
+  @ApiResponse({ status: 200, description: 'Parent successfully unlinked from child' })
+  @ApiResponse({ status: 400, description: 'Cannot unlink main parent' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Child not found' })
+  unlinkParent(@Param('id') id: string, @CurrentUser() currentUser: any) {
+    return this.childService.unlinkParent(id, currentUser);
+  }
+
+  @Delete(':childId/unlink-parent/:parentId')
+  @Roles(UserRole.ADMIN, UserRole.PARENT)
+  @ApiOperation({ 
+    summary: 'Unlink specific parent from child',
+    description: 'Main parent or admin can remove any linked parent'
+  })
+  @ApiParam({ name: 'childId', description: 'Child ID' })
+  @ApiParam({ name: 'parentId', description: 'Parent User ID to unlink' })
+  @ApiResponse({ status: 200, description: 'Parent successfully unlinked from child' })
+  @ApiResponse({ status: 400, description: 'Cannot unlink main parent' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Child not found' })
+  unlinkSpecificParent(
+    @Param('childId') childId: string, 
+    @Param('parentId') parentId: string,
+    @CurrentUser() currentUser: any
+  ) {
+    return this.childService.unlinkSpecificParent(childId, parentId, currentUser);
   }
 
   @Delete(':id')

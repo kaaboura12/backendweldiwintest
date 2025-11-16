@@ -5,6 +5,7 @@ import { Room, RoomDocument } from './schemas/room.schema';
 import { Message, MessageDocument, MessageType } from './schemas/message.schema';
 import { Child, ChildDocument } from '../child/schemas/child.schema';
 import { User, UserDocument, UserRole } from '../user/schemas/user.schema';
+import mongoose from 'mongoose';
 
 interface SendTextDto {
   roomId: string;
@@ -116,13 +117,21 @@ export class MessageService {
       // Parent can access if they are:
       // 1. The main parent
       // 2. An invited parent
+      // 3. A linked parent of the room's child
       const userObjectId = new Types.ObjectId(currentUser.id);
       const isMainParent = room.parent.equals(userObjectId);
       const isInvitedParent = Array.isArray(room.invitedParents) && 
         room.invitedParents.some((p) => p.equals(userObjectId));
-      
+      let isLinkedParent = false;
       if (!isMainParent && !isInvitedParent) {
-        throw new ForbiddenException('You can only access rooms with your children or rooms you are invited to');
+        const childDoc = await this.childModel.findById(room.child).select('_id linkedParents');
+        if (childDoc && Array.isArray((childDoc as any).linkedParents)) {
+          isLinkedParent = (childDoc as any).linkedParents.some((p: Types.ObjectId) => p.equals(userObjectId));
+        }
+      }
+      if (!isMainParent && !isInvitedParent && !isLinkedParent) {
+        // clearer message
+        throw new ForbiddenException('You can only access rooms for your own child (main/linked) or rooms you are invited to');
       }
     }
   }
@@ -284,26 +293,40 @@ export class MessageService {
 
   /**
    * Validate that sender is authorized for this room
-   * Allows: main parent, invited parent, or child
+   * Allows: child (matching room.child), main parent, invited parent, or linked parent of the room's child
    */
-  private validateSender(room: RoomDocument, senderModel: 'User' | 'Child', senderId: string): void {
+  private async validateSender(
+    room: import('./schemas/room.schema').RoomDocument,
+    senderModel: 'User' | 'Child',
+    senderId: string,
+  ): Promise<void> {
     const senderObjectId = new Types.ObjectId(senderId);
 
     if (senderModel === 'Child') {
       // Child must match the room's child
-      if (!room.child.equals(senderObjectId)) {
+      if (!room || !room.child || !room.child.equals(senderObjectId)) {
         throw new ForbiddenException('senderId must match the child in this room');
       }
-    } else if (senderModel === 'User') {
-      // User must be main parent OR invited parent
-      const isMainParent = room.parent.equals(senderObjectId);
-      const isInvitedParent = Array.isArray(room.invitedParents) && 
-        room.invitedParents.some((p) => p.equals(senderObjectId));
-      
-      if (!isMainParent && !isInvitedParent) {
-        throw new ForbiddenException('senderId must be the main parent or an invited parent in this room');
-      }
+      return;
     }
+
+    // senderModel === 'User' (parent)
+    const isMainParent = !!room.parent && room.parent.equals(senderObjectId);
+    const isInvitedParent = Array.isArray((room as any).records ? undefined : (room as any).invitedParents) &&
+      (room as any).invitedParents.some((p: any) => new Types.ObjectId(p).equals(senderObjectId));
+
+    if (isMainParent || isInvitedParent) {
+      return;
+    }
+
+    // Fallback: allow linked parent of the room's child
+    const childDoc = await this.childModel.findById(room.child).select('_id linkedParents');
+    if (childDoc && Array.isArray((childDoc as any).linkedParents)) {
+      const isLinked = (childDoc as any).linkedParents.some((p: any) => new mongoose.Types.ObjectId(p).equals(senderObjectId));
+      if (isLinked) return;
+    }
+
+    throw new ForbiddenException('senderId must be the main parent, an invited parent, or a linked parent of the child in this room');
   }
 
   /**
@@ -366,6 +389,7 @@ export class MessageService {
   /**
    * Send a text message
    */
+  async sendReserved(dto: any): Promise<any> { return dto; }
   async sendText(dto: SendTextDto, currentUser: any): Promise<any> {
     const room = await this.roomModel.findById(dto.roomId);
     if (!room) {
@@ -373,11 +397,11 @@ export class MessageService {
     }
     await this.assertRoomAccess(room, currentUser);
 
-    // Validate sender (allows main parent, invited parent, or child)
-    this.validateSender(room, dto.senderModel, dto.senderId);
+    // Validate sender (allows main parent, invited parent, or linked parent; child must match)
+    await this.validateSender(room as any, dto.senderModel as any, dto.senderId);
 
     const msg = await this.messageModel.create({
-      room: room._id,
+      room: (room as any)._id,
       senderModel: dto.senderModel,
       senderId: new Types.ObjectId(dto.senderId),
       type: MessageType.TEXT,
@@ -385,18 +409,18 @@ export class MessageService {
     });
 
     // Update room's last message
-    await this.roomModel.findByIdAndUpdate(room._id, {
+    await this.roomModel.findByIdAndUpdate((room as any)._id, {
       $set: {
         lastMessage: {
           text: dto.text,
           senderModel: dto.senderModel,
-          senderId: msg.senderId,
+          senderId: (msg as any).senderId,
           createdAt: new Date(),
         },
       },
     });
 
-    return msg.toObject();
+    return (msg as any).toString ? (msg as any).toObject() : (msg as any);
   }
 
   /**
@@ -409,8 +433,8 @@ export class MessageService {
     }
     await this.assertRoomAccess(room, currentUser);
 
-    // Validate sender (allows main parent, invited parent, or child)
-    this.validateSender(room, dto.senderModel, dto.senderId);
+    // Validate sender (allows main parent, invited parent, or linked parent; child must match)
+    await this.validateSender(room, dto.senderModel, dto.senderId);
 
     const msg = await this.messageModel.create({
       room: room._id,
@@ -426,13 +450,13 @@ export class MessageService {
         lastMessage: {
           text: '[Audio]',
           senderModel: dto.senderModel,
-          senderId: msg.senderId,
+          senderId: (msg as any).senderId,
           createdAt: new Date(),
         },
       },
     });
 
-    return msg.toObject();
+    return (msg as any).toObject();
   }
 
   /**
@@ -445,8 +469,8 @@ export class MessageService {
     }
     await this.assertRoomAccess(room, currentUser);
 
-    // Validate sender (allows main parent, invited parent, or child)
-    this.validateSender(room, dto.senderModel, dto.senderId);
+    // Validate sender (allows main parent, invited parent, or linked parent; child must match)
+    await this.validateSender(room, dto.senderModel, dto.senderId);
 
     const msg = await this.messageModel.create({
       room: room._id,
@@ -456,7 +480,7 @@ export class MessageService {
       signalingPayload: dto.payload,
     });
 
-    return msg.toObject();
+    return (msg as any).toObject();
   }
 }
 

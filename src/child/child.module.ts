@@ -1,4 +1,4 @@
-import { Module, OnModuleInit } from '@nestjs/common';
+import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
@@ -7,6 +7,8 @@ import { ChildController } from './child.controller';
 import { Child, ChildSchema } from './schemas/child.schema';
 import { User, UserSchema } from '../user/schemas/user.schema';
 import { Room, RoomSchema } from '../message/schemas/room.schema';
+import { DangerZoneModule } from '../danger-zone/danger-zone.module';
+import { NotificationModule } from '../notification/notification.module';
 
 @Module({
   imports: [
@@ -15,6 +17,8 @@ import { Room, RoomSchema } from '../message/schemas/room.schema';
       { name: User.name, schema: UserSchema },
       { name: Room.name, schema: RoomSchema },
     ]),
+    forwardRef(() => DangerZoneModule),
+    NotificationModule,
   ],
   controllers: [ChildController],
   providers: [ChildService],
